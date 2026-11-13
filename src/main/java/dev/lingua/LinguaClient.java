@@ -60,7 +60,7 @@ public class LinguaClient implements ClientModInitializer {
         Translator.toHinglish(text, true).whenComplete((t, err) -> {
             IN_FLIGHT.decrementAndGet();
             if (err != null || t == null || t.equalsIgnoreCase("SAME") || t.isBlank()) return;
-                            mc.execute(() -> mc.gui.hud.getChat().addMessage(
+            mc.execute(() -> addChatLine(
                     Component.literal("[T] " + t).withStyle(ChatFormatting.GRAY)));
         });
     }
@@ -101,8 +101,12 @@ public class LinguaClient implements ClientModInitializer {
     }
 
     public static void info(String s) {
-                mc.gui.hud.getChat().addMessage(Component.literal(s).withStyle(ChatFormatting.GRAY));
-        mc.gui.hud.getChat().addMessage(Component.literal(s).withStyle(ChatFormatting.GRAY));
+        addChatLine(Component.literal(s).withStyle(ChatFormatting.GRAY));
+    }
+
+    /** Sirf tumhari screen pe line dikhata hai, server ko kuch nahi jata. */
+    private static void addChatLine(Component c) {
+        Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(c);
     }
 
     public static String errMsg(Throwable t) {
