@@ -1,6 +1,7 @@
 package dev.lingua;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -16,7 +17,14 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
+/**
+ * Do providers:
+ *  - Key "sk-ant-..." -> Anthropic (Claude)
+ *  - Baaki koi bhi key (AIza...) -> Google Gemini (free tier)
+ */
 public final class Translator {
+    private static final String GEMINI_MODEL = "gemini-2.5-flash";
+
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(8)).build();
 
@@ -68,6 +76,29 @@ public final class Translator {
         }
         if (text.length() > 300) text = text.substring(0, 300);
 
+        boolean claude = key.startsWith("sk-ant-");
+        HttpRequest req = claude ? anthropicRequest(cfg, key, system, text) : geminiRequest(key, system, text);
+
+        return HTTP.sendAsync(req, HttpResponse.BodyHandlers.ofString()).thenApply(res -> {
+            int code = res.statusCode();
+            if (code / 100 != 2) {
+                String hint = switch (code) {
+                    case 400 -> " (key ya request galat)";
+                    case 401, 403 -> " (key galat ya allowed nahi)";
+                    case 429 -> " (limit lag gayi, thodi der ruko)";
+                    default -> "";
+                };
+                throw new CompletionException(new IOException("API error " + code + hint));
+            }
+            String out = claude ? parseAnthropic(res.body()) : parseGemini(res.body());
+            if (out.isBlank()) throw new CompletionException(new IOException("Khaali jawab aaya (shayad blocked)"));
+            CACHE.put(cacheKey, out);
+            return out;
+        });
+    }
+
+    // ---------- Anthropic ----------
+    private static HttpRequest anthropicRequest(LinguaConfig cfg, String key, String system, String text) {
         JsonObject body = new JsonObject();
         body.addProperty("model", cfg.model);
         body.addProperty("max_tokens", 400);
@@ -79,23 +110,73 @@ public final class Translator {
         msgs.add(m);
         body.add("messages", msgs);
 
-        HttpRequest req = HttpRequest.newBuilder(URI.create("https://api.anthropic.com/v1/messages"))
+        return HttpRequest.newBuilder(URI.create("https://api.anthropic.com/v1/messages"))
                 .timeout(Duration.ofSeconds(20))
                 .header("content-type", "application/json")
                 .header("x-api-key", key)
                 .header("anthropic-version", "2023-06-01")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                 .build();
+    }
 
-        return HTTP.sendAsync(req, HttpResponse.BodyHandlers.ofString()).thenApply(res -> {
-            if (res.statusCode() / 100 != 2) {
-                throw new CompletionException(new IOException("API error " + res.statusCode()));
-            }
-            JsonObject json = JsonParser.parseString(res.body()).getAsJsonObject();
-            String out = json.getAsJsonArray("content").get(0).getAsJsonObject()
-                    .get("text").getAsString().trim();
-            CACHE.put(cacheKey, out);
-            return out;
-        });
+    private static String parseAnthropic(String raw) {
+        JsonObject json = JsonParser.parseString(raw).getAsJsonObject();
+        return json.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString().trim();
+    }
+
+    // ---------- Gemini (free) ----------
+    private static HttpRequest geminiRequest(String key, String system, String text) {
+        JsonObject body = new JsonObject();
+
+        JsonObject sysPart = new JsonObject();
+        sysPart.addProperty("text", system);
+        JsonArray sysParts = new JsonArray();
+        sysParts.add(sysPart);
+        JsonObject sysInstr = new JsonObject();
+        sysInstr.add("parts", sysParts);
+        body.add("systemInstruction", sysInstr);
+
+        JsonObject userPart = new JsonObject();
+        userPart.addProperty("text", text);
+        JsonArray userParts = new JsonArray();
+        userParts.add(userPart);
+        JsonObject content = new JsonObject();
+        content.addProperty("role", "user");
+        content.add("parts", userParts);
+        JsonArray contents = new JsonArray();
+        contents.add(content);
+        body.add("contents", contents);
+
+        JsonObject thinking = new JsonObject();
+        thinking.addProperty("thinkingBudget", 0);      // translation ke liye sochne ki zaroorat nahi, fast rahe
+        JsonObject gen = new JsonObject();
+        gen.addProperty("maxOutputTokens", 600);
+        gen.addProperty("temperature", 0.3);
+        gen.add("thinkingConfig", thinking);
+        body.add("generationConfig", gen);
+
+        return HttpRequest.newBuilder(URI.create(
+                        "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent"))
+                .timeout(Duration.ofSeconds(20))
+                .header("content-type", "application/json")
+                .header("x-goog-api-key", key)
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+                .build();
+    }
+
+    private static String parseGemini(String raw) {
+        JsonObject json = JsonParser.parseString(raw).getAsJsonObject();
+        JsonArray cands = json.has("candidates") ? json.getAsJsonArray("candidates") : null;
+        if (cands == null || cands.isEmpty()) return "";
+        JsonObject c = cands.get(0).getAsJsonObject();
+        if (!c.has("content")) return "";
+        JsonObject content = c.getAsJsonObject("content");
+        if (!content.has("parts")) return "";
+        StringBuilder sb = new StringBuilder();
+        for (JsonElement p : content.getAsJsonArray("parts")) {
+            JsonObject po = p.getAsJsonObject();
+            if (po.has("text")) sb.append(po.get("text").getAsString());
+        }
+        return sb.toString().trim();
     }
 }
