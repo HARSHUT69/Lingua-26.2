@@ -102,7 +102,7 @@ public class LinguaClient implements ClientModInitializer {
 
     public static void info(String s) {
                 mc.gui.hud.getChat().addMessage(Component.literal(s).withStyle(ChatFormatting.GRAY));
-        mc.gui.getChat().addMessage(Component.literal(s).withStyle(ChatFormatting.GRAY));
+        mc.gui.hud.getChat().addMessage(Component.literal(s).withStyle(ChatFormatting.GRAY));
     }
 
     public static String errMsg(Throwable t) {
