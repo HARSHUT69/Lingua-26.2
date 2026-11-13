@@ -60,7 +60,7 @@ public class LinguaClient implements ClientModInitializer {
         Translator.toHinglish(text, true).whenComplete((t, err) -> {
             IN_FLIGHT.decrementAndGet();
             if (err != null || t == null || t.equalsIgnoreCase("SAME") || t.isBlank()) return;
-            mc.execute(() -> mc.gui.getChat().addMessage(
+                            mc.execute(() -> mc.gui.hud.getChat().addMessage(
                     Component.literal("[T] " + t).withStyle(ChatFormatting.GRAY)));
         });
     }
@@ -101,7 +101,7 @@ public class LinguaClient implements ClientModInitializer {
     }
 
     public static void info(String s) {
-        Minecraft mc = Minecraft.getInstance();
+                mc.gui.hud.getChat().addMessage(Component.literal(s).withStyle(ChatFormatting.GRAY));
         mc.gui.getChat().addMessage(Component.literal(s).withStyle(ChatFormatting.GRAY));
     }
 
