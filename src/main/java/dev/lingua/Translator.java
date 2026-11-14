@@ -23,7 +23,11 @@ import java.util.concurrent.CompletionException;
  *  - Baaki koi bhi key (AIza...) -> Google Gemini (free tier)
  */
 public final class Translator {
-    private static final String GEMINI_MODEL = "gemini-2.5-flash";
+    // Google purane models band karta rehta hai, isliye list: pehla na mile (404) to agla try hota hai.
+    private static final String[] GEMINI_MODELS = {
+            "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3-flash-preview"
+    };
+    private static volatile int geminiIdx = 0;
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(8)).build();
@@ -77,13 +81,16 @@ public final class Translator {
         if (text.length() > 300) text = text.substring(0, 300);
 
         boolean claude = key.startsWith("sk-ant-");
-        HttpRequest req = claude ? anthropicRequest(cfg, key, system, text) : geminiRequest(key, system, text);
+        CompletableFuture<HttpResponse<String>> fut = claude
+                ? HTTP.sendAsync(anthropicRequest(cfg, key, system, text), HttpResponse.BodyHandlers.ofString())
+                : sendGemini(key, system, text, geminiIdx);
 
-        return HTTP.sendAsync(req, HttpResponse.BodyHandlers.ofString()).thenApply(res -> {
+        return fut.thenApply(res -> {
             int code = res.statusCode();
             if (code / 100 != 2) {
                 String hint = switch (code) {
                     case 400 -> " (key ya request galat)";
+                    case 404 -> " (model nahi mila)";
                     case 401, 403 -> " (key galat ya allowed nahi)";
                     case 429 -> " (limit lag gayi, thodi der ruko)";
                     default -> "";
@@ -125,7 +132,18 @@ public final class Translator {
     }
 
     // ---------- Gemini (free) ----------
-    private static HttpRequest geminiRequest(String key, String system, String text) {
+    private static CompletableFuture<HttpResponse<String>> sendGemini(String key, String system, String text, int idx) {
+        return HTTP.sendAsync(geminiRequest(GEMINI_MODELS[idx], key, system, text), HttpResponse.BodyHandlers.ofString())
+                .thenCompose(res -> {
+                    if (res.statusCode() == 404 && idx + 1 < GEMINI_MODELS.length) {
+                        return sendGemini(key, system, text, idx + 1);   // agla model try karo
+                    }
+                    if (res.statusCode() / 100 == 2) geminiIdx = idx;      // chalne wala model yaad rakho
+                    return CompletableFuture.completedFuture(res);
+                });
+    }
+
+    private static HttpRequest geminiRequest(String model, String key, String system, String text) {
         JsonObject body = new JsonObject();
 
         JsonObject sysPart = new JsonObject();
@@ -147,16 +165,13 @@ public final class Translator {
         contents.add(content);
         body.add("contents", contents);
 
-        JsonObject thinking = new JsonObject();
-        thinking.addProperty("thinkingBudget", 0);      // translation ke liye sochne ki zaroorat nahi, fast rahe
         JsonObject gen = new JsonObject();
-        gen.addProperty("maxOutputTokens", 600);
+        gen.addProperty("maxOutputTokens", 1024);
         gen.addProperty("temperature", 0.3);
-        gen.add("thinkingConfig", thinking);
         body.add("generationConfig", gen);
 
         return HttpRequest.newBuilder(URI.create(
-                        "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent"))
+                        "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"))
                 .timeout(Duration.ofSeconds(20))
                 .header("content-type", "application/json")
                 .header("x-goog-api-key", key)
