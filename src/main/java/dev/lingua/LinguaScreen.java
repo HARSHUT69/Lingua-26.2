@@ -1,5 +1,6 @@
 package dev.lingua;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -29,11 +30,11 @@ public class LinguaScreen extends Screen {
         int w = 260, x = width / 2 - w / 2, y = height / 2 - 95;
 
         inBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
-            c.incoming = !c.incoming; refresh();
+            c.incoming = !c.incoming; LinguaConfig.save(); refresh();
         }).bounds(x, y, w, 20).build());
 
         outBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
-            c.outgoing = !c.outgoing; refresh();
+            c.outgoing = !c.outgoing; LinguaConfig.save(); refresh();
         }).bounds(x, y + 24, w, 20).build());
 
         langBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
@@ -46,7 +47,7 @@ public class LinguaScreen extends Screen {
         keyBox.setMaxLength(300);
         String saved = c.key();
         keyBox.setHint(Component.literal(saved.isEmpty()
-                ? "Anthropic API key yahan paste karo"
+                ? "API key yahan paste karo (Gemini ya Anthropic)"
                 : "Key saved (****" + saved.substring(Math.max(0, saved.length() - 4)) + ") - badalni ho to paste karo"));
         addRenderableWidget(keyBox);
 
@@ -64,10 +65,15 @@ public class LinguaScreen extends Screen {
         setInitialFocus(inputBox);
     }
 
+    private static Component onOff(String label, boolean on) {
+        return Component.literal(label + ": ")
+                .append(Component.literal(on ? "ON" : "OFF").withStyle(on ? ChatFormatting.GREEN : ChatFormatting.RED));
+    }
+
     private void refresh() {
         LinguaConfig c = LinguaConfig.get();
-        inBtn.setMessage(Component.literal("Incoming (unka chat -> Hinglish): " + (c.incoming ? "ON" : "OFF")));
-        outBtn.setMessage(Component.literal("Outgoing (mera chat -> unki language): " + (c.outgoing ? "ON" : "OFF")));
+        inBtn.setMessage(onOff("Unka chat -> Hinglish", c.incoming));
+        outBtn.setMessage(onOff("Mera chat/whisper -> unki language", c.outgoing));
         langBtn.setMessage(Component.literal("Unki language: " + c.targetLanguage + "  (click = badlo)"));
     }
 
