@@ -21,14 +21,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class LinguaClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("lingua");
 
-    /** Wo messages jo hum khud bhej rahe hain (dobara translate na ho). */
+    /** Server ka echo (jaise "You whisper to X: ...") dobara translate na ho. */
     private static final Set<String> SKIP = ConcurrentHashMap.newKeySet();
+    /** Jo message abhi translate karke bheja, wo wapas hamare hi handler se na guzre (loop na bane). */
+    private static final Set<String> LOOP = ConcurrentHashMap.newKeySet();
     private static final AtomicInteger IN_FLIGHT = new AtomicInteger();
     private static KeyMapping openKey;
-    private static KeyMapping toggleKey;
 
-    /** Jin commands me last ka text translate hoga: /msg <player> <text>, /r <text> */
+    /** /msg <player> <text> jaise commands, jinka last ka text translate hoga. */
     private static final Set<String> WHISPER_WITH_NAME = Set.of("msg", "tell", "w", "whisper", "m", "t");
+    /** /r <text> */
     private static final Set<String> WHISPER_REPLY = Set.of("r", "reply");
 
     @Override
@@ -36,28 +38,34 @@ public class LinguaClient implements ClientModInitializer {
         LinguaConfig.load();
 
         openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.lingua.open", InputConstants.Type.KEYSYM, InputConstants.KEY_K, KeyMapping.Category.MISC));
-
-        toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.lingua.toggle", InputConstants.Type.KEYSYM, InputConstants.KEY_G, KeyMapping.Category.MISC));
+                "key.lingua.open", keyboardType(), InputConstants.KEY_K, KeyMapping.Category.MISC));
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             while (openKey.consumeClick()) mc.setScreenAndShow(new LinguaScreen());
-            while (toggleKey.consumeClick()) toggleOutgoing();
         });
 
         // Server plugins aksar chat ko "system message" bana ke bhejte hain, isliye dono events.
         ClientReceiveMessageEvents.GAME.register((msg, overlay) -> { if (!overlay) onIncoming(msg); });
         ClientReceiveMessageEvents.CHAT.register((msg, signed, sender, params, ts) -> onIncoming(msg));
 
-        ClientSendMessageEvents.ALLOW_CHAT.register(LinguaClient::onOutgoing);
+        // Translator ON ho to normal chat aur /msg /r wale whisper translate hote hain.
+        ClientSendMessageEvents.ALLOW_CHAT.register(LinguaClient::onOutgoingChat);
         ClientSendMessageEvents.ALLOW_COMMAND.register(LinguaClient::onOutgoingCommand);
     }
 
-    // ---------- incoming ----------
+    /** 26.2 me KEYSYM, 26.3 (SDL3) me KEYBOARD: dono versions pe ek hi code chale. */
+    private static InputConstants.Type keyboardType() {
+        try {
+            return InputConstants.Type.valueOf("KEYBOARD");
+        } catch (IllegalArgumentException e) {
+            return InputConstants.Type.valueOf("KEYSYM");
+        }
+    }
+
+    // ---------- incoming: unka chat -> Your language ----------
     private static void onIncoming(Component message) {
         LinguaConfig cfg = LinguaConfig.get();
-        if (!cfg.incoming || cfg.key().isEmpty()) return;
+        if (!cfg.enabled || cfg.key().isEmpty()) return;
 
         Minecraft mc = Minecraft.getInstance();
         String text = message.getString().trim();
@@ -67,7 +75,7 @@ public class LinguaClient implements ClientModInitializer {
         if (IN_FLIGHT.get() >= 6) return; // spam me API na jalao
 
         IN_FLIGHT.incrementAndGet();
-        Translator.toHinglish(text, true).whenComplete((t, err) -> {
+        Translator.toMine(text, true).whenComplete((t, err) -> {
             IN_FLIGHT.decrementAndGet();
             if (err != null || t == null || t.equalsIgnoreCase("SAME") || t.isBlank()) return;
             mc.execute(() -> addChatLine(
@@ -75,30 +83,21 @@ public class LinguaClient implements ClientModInitializer {
         });
     }
 
-    // ---------- outgoing ----------
-    private static void toggleOutgoing() {
+    // ---------- outgoing: normal chat + /msg <player> <text> ----------
+    private static boolean onOutgoingChat(String msg) {
+        if (LOOP.remove(msg)) return true;                 // hamara apna translated message
         LinguaConfig cfg = LinguaConfig.get();
-        cfg.outgoing = !cfg.outgoing;
-        LinguaConfig.save();
-        info("Mera chat/whisper translate: " + (cfg.outgoing ? "ON (" + cfg.targetLanguage + ")" : "OFF"));
-        if (cfg.outgoing && cfg.key().isEmpty()) info("API key set nahi hai (K dabao aur key daalo)");
-    }
-
-    /** Outgoing ON ho to normal chat translate hoke jata hai. OFF ho to waise ka waisa. */
-    private static boolean onOutgoing(String msg) {
-        if (SKIP.remove(msg)) return true;                 // hamara apna translated msg
-        LinguaConfig cfg = LinguaConfig.get();
-        if (!cfg.outgoing || cfg.key().isEmpty()) return true;
+        if (!cfg.enabled || cfg.key().isEmpty()) return true;
         if (msg.isBlank()) return true;
         translateAndSend(msg, null);
         return false;                                      // original cancel
     }
 
-    /** /msg <player> <text> aur /r <text> ka text translate karta hai (command slash ke bina aata hai). */
+    /** Command slash ke bina aata hai, jaise "msg Steve bhai kya haal". */
     private static boolean onOutgoingCommand(String command) {
-        if (SKIP.remove("/" + command)) return true;
+        if (LOOP.remove("/" + command)) return true;       // hamara apna translated command
         LinguaConfig cfg = LinguaConfig.get();
-        if (!cfg.outgoing || cfg.key().isEmpty()) return true;
+        if (!cfg.enabled || cfg.key().isEmpty()) return true;
 
         String[] p = command.split(" ", 3);
         String name = p[0].toLowerCase();
@@ -116,10 +115,10 @@ public class LinguaClient implements ClientModInitializer {
         text = text.trim();
         if (text.isEmpty()) return true;
         translateAndSend(text, prefix);
-        return false;
+        return false;                                      // original cancel
     }
 
-    /** GUI ke "Translate + Send" button ke liye (toggle se alag, hamesha translate karta hai). */
+    /** GUI ke "Translate + Send" button ke liye (toggle se alag, hamesha translate karke public chat me bhejta hai). */
     public static void translateAndSend(String msg) {
         translateAndSend(msg, null);
     }
@@ -128,18 +127,20 @@ public class LinguaClient implements ClientModInitializer {
     public static void translateAndSend(String msg, String cmdPrefix) {
         Minecraft mc = Minecraft.getInstance();
         LinguaConfig cfg = LinguaConfig.get();
-        Translator.fromHinglish(msg, cfg.targetLanguage).whenComplete((t, err) -> mc.execute(() -> {
+        Translator.fromMine(msg, cfg.targetLanguage).whenComplete((t, err) -> mc.execute(() -> {
             if (err != null) {
-                info("Translate fail: " + errMsg(err) + "  (message bheja nahi gaya; G dabao to translate band hoga)");
+                info("Translate fail: " + errMsg(err) + "  (message bheja nahi gaya)");
                 return;
             }
             String out = t.length() > 256 ? t.substring(0, 256) : t;
             if (mc.getConnection() == null) return;
+            if (SKIP.size() > 50) SKIP.clear();
+            SKIP.add(out);                                 // server ka echo dobara translate na ho
             if (cmdPrefix == null) {
-                SKIP.add(out);
+                LOOP.add(out);
                 mc.getConnection().sendChat(out);
             } else {
-                SKIP.add("/" + cmdPrefix + out);
+                LOOP.add("/" + cmdPrefix + out);
                 mc.getConnection().sendCommand(cmdPrefix + out);
             }
             info("[T] " + msg + "  ->  " + out);

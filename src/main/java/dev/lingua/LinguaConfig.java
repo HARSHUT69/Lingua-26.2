@@ -13,10 +13,10 @@ public class LinguaConfig {
     private static LinguaConfig instance = new LinguaConfig();
 
     public String apiKey = "";
-    public String model = "claude-haiku-5-5";
-    public boolean incoming = true;   // dusre players ka chat -> Hinglish
-    public boolean outgoing = true;   // tumhara chat -> target language
-    public String targetLanguage = "Japanese";
+    public String model = "claude-haiku-5-5";   // sirf Anthropic key ke liye
+    public boolean enabled = false;              // master: Translator ON/OFF
+    public String myLanguage = "Hinglish";       // Your language: English / Hindi / Hinglish
+    public String targetLanguage = "Japanese";   // jis se /msg pe baat kar rahe ho
 
     public static LinguaConfig get() { return instance; }
 
@@ -36,6 +36,8 @@ public class LinguaConfig {
         } catch (Exception e) {
             LinguaClient.LOGGER.warn("Lingua config load fail", e);
         }
+        if (instance.myLanguage == null || instance.myLanguage.isBlank()) instance.myLanguage = "Hinglish";
+        if (instance.targetLanguage == null || instance.targetLanguage.isBlank()) instance.targetLanguage = "Japanese";
     }
 
     public static void save() {

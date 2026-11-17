@@ -12,13 +12,14 @@ import net.minecraft.util.FormattedCharSequence;
 import java.util.List;
 
 public class LinguaScreen extends Screen {
+    private static final List<String> MY_LANGS = List.of("English", "Hindi", "Hinglish");
     private static final List<String> LANGS = List.of(
             "Japanese", "Chinese (Simplified)", "Chinese (Traditional)", "Korean", "English",
             "Spanish", "Portuguese", "Russian", "German", "French", "Turkish", "Arabic",
             "Indonesian", "Thai", "Vietnamese", "Polish", "Italian", "Filipino");
 
     private EditBox keyBox, inputBox;
-    private Button inBtn, outBtn, langBtn;
+    private Button masterBtn, myLangBtn, langBtn;
     private volatile String preview = "";
     private volatile String back = "";
 
@@ -29,18 +30,20 @@ public class LinguaScreen extends Screen {
         LinguaConfig c = LinguaConfig.get();
         int w = 260, x = width / 2 - w / 2, y = height / 2 - 95;
 
-        inBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
-            c.incoming = !c.incoming; LinguaConfig.save(); refresh();
+        masterBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
+            c.enabled = !c.enabled; LinguaConfig.save(); refresh();
         }).bounds(x, y, w, 20).build());
 
-        outBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
-            c.outgoing = !c.outgoing; LinguaConfig.save(); refresh();
+        myLangBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
+            int i = MY_LANGS.indexOf(c.myLanguage);
+            c.myLanguage = MY_LANGS.get((i + 1) % MY_LANGS.size());
+            LinguaConfig.save(); refresh();
         }).bounds(x, y + 24, w, 20).build());
 
         langBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
             int i = LANGS.indexOf(c.targetLanguage);
             c.targetLanguage = LANGS.get((i + 1) % LANGS.size());
-            refresh();
+            LinguaConfig.save(); refresh();
         }).bounds(x, y + 48, w, 20).build());
 
         keyBox = new EditBox(font, x, y + 78, w, 20, Component.literal("API key"));
@@ -53,7 +56,7 @@ public class LinguaScreen extends Screen {
 
         inputBox = new EditBox(font, x, y + 108, w, 20, Component.literal("Message"));
         inputBox.setMaxLength(200);
-        inputBox.setHint(Component.literal("Hinglish me likho, e.g. bhai kya chal raha hai"));
+        inputBox.setHint(Component.literal("Apni language me likho, e.g. bhai kya chal raha hai"));
         addRenderableWidget(inputBox);
 
         addRenderableWidget(Button.builder(Component.literal("Preview"), b -> doPreview())
@@ -72,8 +75,8 @@ public class LinguaScreen extends Screen {
 
     private void refresh() {
         LinguaConfig c = LinguaConfig.get();
-        inBtn.setMessage(onOff("Unka chat -> Hinglish", c.incoming));
-        outBtn.setMessage(onOff("Mera chat/whisper -> unki language", c.outgoing));
+        masterBtn.setMessage(onOff("Translator", c.enabled));
+        myLangBtn.setMessage(Component.literal("Your language: " + c.myLanguage + "  (click = badlo)"));
         langBtn.setMessage(Component.literal("Unki language: " + c.targetLanguage + "  (click = badlo)"));
     }
 
@@ -89,8 +92,8 @@ public class LinguaScreen extends Screen {
         applyKey();
         preview = "Translate ho raha hai...";
         back = "";
-        Translator.fromHinglish(text, LinguaConfig.get().targetLanguage)
-                .thenCompose(t -> { preview = t; return Translator.toHinglish(t, false); })
+        Translator.fromMine(text, LinguaConfig.get().targetLanguage)
+                .thenCompose(t -> { preview = t; return Translator.toMine(t, false); })
                 .whenComplete((bk, err) -> {
                     if (err != null) { preview = "Error: " + LinguaClient.errMsg(err); back = ""; }
                     else back = bk;
@@ -119,10 +122,12 @@ public class LinguaScreen extends Screen {
             }
         }
         if (!back.isEmpty()) {
-            for (FormattedCharSequence line : font.split(FormattedText.of("Wapas Hinglish me: " + back), w)) {
+            for (FormattedCharSequence line : font.split(FormattedText.of("Wapas " + LinguaConfig.get().myLanguage + " me: " + back), w)) {
                 g.text(font, line, x, ty, 0xFFAAAAAA); ty += 10;
             }
         }
+        g.centeredText(font, Component.literal("ON hone par tumhara chat aur /msg translate hote hain. OFF = sab normal."),
+                width / 2, height - 22, 0xFFAAAAAA);
     }
 
     @Override
