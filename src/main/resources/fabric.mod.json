@@ -3,13 +3,13 @@
   "id": "lingua",
   "version": "1.0.0",
   "name": "Lingua Chat Translator",
-  "description": "Foreign server chat -> Hinglish, aur tumhara Hinglish -> unki language (gamer slang ke saath).",
+  "description": "Foreign server chat -> Your language, aur /msg whisper -> unki language.",
   "license": "MIT",
   "environment": "client",
   "entrypoints": { "client": ["dev.lingua.LinguaClient"] },
   "depends": {
     "fabricloader": ">=0.16.0",
-    "minecraft": "~26.2",
+    "minecraft": "~${minecraft_version}",
     "java": ">=25",
     "fabric-api": "*"
   }
