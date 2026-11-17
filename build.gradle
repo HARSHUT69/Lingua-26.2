@@ -3,12 +3,19 @@ plugins {
 }
 
 version = project.mod_version
-base { archivesName = project.archives_base_name }
+base { archivesName = "${project.archives_base_name}-mc${project.minecraft_version}" }
 
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+    inputs.property "minecraft_version", project.minecraft_version
+    filesMatching("fabric.mod.json") {
+        expand "minecraft_version": project.minecraft_version
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {
